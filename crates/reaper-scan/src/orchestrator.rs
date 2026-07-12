@@ -15,6 +15,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[non_exhaustive]
 pub enum ScanEvent {
     Discovered(Candidate),
+    /// Heartbeat while walking (every ~128 dirs) — live feedback is a
+    /// product requirement, not a nicety.
+    Progress {
+        dirs: u64,
+        files: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +66,13 @@ pub fn scan(
 }
 
 fn visit<'s>(dir: Utf8PathBuf, s: &rayon::Scope<'s>, ctx: &'s Ctx<'_>) {
-    ctx.dirs.fetch_add(1, Ordering::Relaxed);
+    let d = ctx.dirs.fetch_add(1, Ordering::Relaxed) + 1;
+    if d.is_multiple_of(128) {
+        (ctx.emit)(ScanEvent::Progress {
+            dirs: d,
+            files: ctx.files.load(Ordering::Relaxed),
+        });
+    }
     let Ok(entries) = ctx.reader.read_dir(&dir) else {
         return;
     };
@@ -147,8 +159,9 @@ mod tests {
             &Registry::embedded().unwrap(),
             &StdDirReader,
             &|ev| {
-                let ScanEvent::Discovered(c) = ev;
-                seen.lock().unwrap().push(c);
+                if let ScanEvent::Discovered(c) = ev {
+                    seen.lock().unwrap().push(c);
+                }
             },
         );
 

@@ -76,10 +76,17 @@ impl<'a> Deleter<'a> {
     /// Execute a sealed plan. Every step re-verifies its world before
     /// touching it; any doubt leaves the step's tree in place.
     pub fn execute(&mut self, plan: &SealedPlan) -> Vec<StepOutcome> {
+        let mut outcomes = Vec::new();
+        self.execute_with(plan, &mut |o| outcomes.push(o.clone()));
+        outcomes
+    }
+
+    /// Streaming variant: each step's outcome is delivered the moment it
+    /// lands, so a UI can show reap progress live.
+    pub fn execute_with(&mut self, plan: &SealedPlan, on: &mut dyn FnMut(&StepOutcome)) {
         let _ = self.log(&ManifestEvent::Planned {
             digest: plan.digest.clone(),
         });
-        let mut outcomes = Vec::new();
         for (i, bound) in plan.steps.iter().enumerate() {
             let step = bound.step();
             let path = step.path().clone();
@@ -90,14 +97,14 @@ impl<'a> Deleter<'a> {
                 match crate::prober::identity_of(&path) {
                     Some(now) if now == planned => {}
                     Some(_) => {
-                        outcomes.push(self.refuse(
+                        on(&self.refuse(
                             path,
                             "identity drifted since planning (dev/ino/mtime mismatch) — re-scan",
                         ));
                         continue;
                     }
                     None => {
-                        outcomes.push(self.refuse(path, "gone or unreadable at execution time"));
+                        on(&self.refuse(path, "gone or unreadable at execution time"));
                         continue;
                     }
                 }
@@ -108,13 +115,11 @@ impl<'a> Deleter<'a> {
                 match live.live_pids(std::slice::from_ref(&path)).remove(0) {
                     Some(pids) if pids.is_empty() => {}
                     Some(pids) => {
-                        outcomes.push(self.refuse(path, &format!("live process(es) {pids:?}")));
+                        on(&self.refuse(path, &format!("live process(es) {pids:?}")));
                         continue;
                     }
                     None => {
-                        outcomes.push(
-                            self.refuse(path, "live-process fact unestablishable at execution"),
-                        );
+                        on(&self.refuse(path, "live-process fact unestablishable at execution"));
                         continue;
                     }
                 }
@@ -129,7 +134,7 @@ impl<'a> Deleter<'a> {
             let tomb = match path.parent() {
                 Some(parent) => parent.join(format!(".reaper-tomb-{}-{i}", std::process::id())),
                 None => {
-                    outcomes.push(self.refuse(path, "refusing to reap a filesystem root"));
+                    on(&self.refuse(path, "refusing to reap a filesystem root"));
                     continue;
                 }
             };
@@ -141,7 +146,7 @@ impl<'a> Deleter<'a> {
                 recover: bound.recover.clone(),
                 size_bytes: bound.size_bytes,
             }) {
-                outcomes.push(self.refuse(path, &format!("write-ahead manifest unwritable: {e}")));
+                on(&self.refuse(path, &format!("write-ahead manifest unwritable: {e}")));
                 continue;
             }
             if let Err(e) = std::fs::rename(&path, &tomb) {
@@ -153,7 +158,7 @@ impl<'a> Deleter<'a> {
                     }
                     _ => format!("tomb rename failed: {e}"),
                 };
-                outcomes.push(self.refuse(path, &why));
+                on(&self.refuse(path, &why));
                 continue;
             }
 
@@ -172,7 +177,7 @@ impl<'a> Deleter<'a> {
                             eprintln!("note: {path}: worktree admin dir not removed ({e}); `git worktree prune` will finish it");
                         }
                     }
-                    outcomes.push(StepOutcome::Reaped {
+                    on(&StepOutcome::Reaped {
                         path,
                         freed_bytes: bound.size_bytes,
                         recover: bound.recover.clone(),
@@ -180,13 +185,10 @@ impl<'a> Deleter<'a> {
                 }
                 Err(e) => {
                     // Tomb persists on disk AND in the manifest — resumable.
-                    outcomes.push(
-                        self.refuse(tomb, &format!("drain interrupted: {e} (resumes next run)")),
-                    );
+                    on(&self.refuse(tomb, &format!("drain interrupted: {e} (resumes next run)")));
                 }
             }
         }
-        outcomes
     }
 
     fn refuse(&mut self, path: Utf8PathBuf, why: &str) -> StepOutcome {
