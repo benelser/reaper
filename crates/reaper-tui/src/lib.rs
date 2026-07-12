@@ -26,6 +26,9 @@ pub fn run(root: Utf8PathBuf, state_dir: Utf8PathBuf) -> std::io::Result<()> {
         ratatui::restore();
         default_hook(info);
     }));
+    // Complete any interrupted drain from a prior run (already-approved
+    // deletions) before presenting fresh state.
+    let _ = Deleter::drain_pending_all(&state_dir.join("log"));
     let mut terminal = ratatui::init();
     let mut app = App::new(root, state_dir);
     let mut rx = spawn_scan(app.root.clone());
@@ -480,8 +483,7 @@ fn spawn_scan(root: Utf8PathBuf) -> mpsc::Receiver<Msg> {
         let live = reaper_scan::select_probe();
         let pids: Vec<Option<Vec<u32>>> = match &live {
             Some(probe) => {
-                let dirs: Vec<Utf8PathBuf> =
-                    candidates.iter().map(|c| c.path.clone()).collect();
+                let dirs: Vec<Utf8PathBuf> = candidates.iter().map(|c| c.path.clone()).collect();
                 probe.live_pids(&dirs)
             }
             None => vec![None; candidates.len()],

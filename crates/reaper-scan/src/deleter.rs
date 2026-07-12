@@ -162,8 +162,12 @@ impl<'a> Deleter<'a> {
                 continue;
             }
 
-            // The path is gone (perceived O(1) reclaim). Drain the tomb.
-            match std::fs::remove_dir_all(&tomb) {
+            // The path is gone (perceived O(1) reclaim). Drain the tomb —
+            // with retries: a writer that raced the sweep (started in the
+            // sweep→rename window; its handles moved WITH the tomb) makes
+            // remove_dir_all return ENOTEMPTY, and it converges once the
+            // writer notices its world vanished (dogfood catch, step 142).
+            match drain_with_retries(&tomb) {
                 Ok(()) => {
                     let _ = self.log(&ManifestEvent::Drained {
                         tomb: tomb.clone(),
@@ -202,28 +206,82 @@ impl<'a> Deleter<'a> {
         }
     }
 
-    /// Crash recovery (§7): any `Tombed` without a matching `Drained` is
-    /// finished now. Called at the start of every execute session.
+    /// Crash/interruption recovery (§7): any `Tombed` without a matching
+    /// `Drained` is finished now, ACROSS ALL manifests — a tomb from any
+    /// prior run must never linger just because its digest isn't re-run
+    /// (dogfood catch). Completed drains are recorded back into their
+    /// manifest so recovery is idempotent.
+    pub fn drain_pending_all(log_dir: &Utf8Path) -> Vec<Utf8PathBuf> {
+        let Ok(rd) = std::fs::read_dir(log_dir) else {
+            return Vec::new();
+        };
+        let mut drained = Vec::new();
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Some(p) = camino::Utf8Path::from_path(&path) else {
+                continue;
+            };
+            drained.extend(Self::drain_pending(p));
+        }
+        drained
+    }
+
+    /// Single-manifest recovery; prefer `drain_pending_all`.
     pub fn drain_pending(manifest_path: &Utf8Path) -> Vec<Utf8PathBuf> {
         let Ok(content) = std::fs::read_to_string(manifest_path) else {
             return Vec::new();
         };
-        let mut pending: Vec<Utf8PathBuf> = Vec::new();
+        let mut pending: Vec<(Utf8PathBuf, u64)> = Vec::new();
         for line in content.lines() {
             match serde_json::from_str::<ManifestEvent>(line) {
-                Ok(ManifestEvent::Tombed { tomb, .. }) => pending.push(tomb),
-                Ok(ManifestEvent::Drained { tomb, .. }) => pending.retain(|t| t != &tomb),
+                Ok(ManifestEvent::Tombed {
+                    tomb, size_bytes, ..
+                }) => pending.push((tomb, size_bytes)),
+                Ok(ManifestEvent::Drained { tomb, .. }) => pending.retain(|(t, _)| t != &tomb),
                 _ => {}
             }
         }
         let mut drained = Vec::new();
-        for tomb in pending {
-            if tomb.symlink_metadata().is_ok() && std::fs::remove_dir_all(&tomb).is_ok() {
+        for (tomb, size_bytes) in pending {
+            if tomb.symlink_metadata().is_ok() && drain_with_retries(&tomb).is_ok() {
+                // Close the ledger so recovery is idempotent.
+                if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(manifest_path) {
+                    let ev = ManifestEvent::Drained {
+                        tomb: tomb.clone(),
+                        freed_bytes: size_bytes,
+                    };
+                    let mut line = serde_json::to_string(&ev).expect("event serializes");
+                    line.push('\n');
+                    let _ = f.write_all(line.as_bytes());
+                    let _ = f.sync_data();
+                }
                 drained.push(tomb);
             }
         }
         drained
     }
+}
+
+/// remove_dir_all with convergence retries for racing writers. The rename
+/// already cut off every path-based open; only pre-existing handles can
+/// still write, and those wind down.
+fn drain_with_retries(tomb: &Utf8Path) -> std::io::Result<()> {
+    let mut last = None;
+    for attempt in 0..4 {
+        match std::fs::remove_dir_all(tomb) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = Some(e);
+                if attempt < 3 {
+                    std::thread::sleep(std::time::Duration::from_millis(250 * (attempt + 1)));
+                }
+            }
+        }
+    }
+    Err(last.unwrap())
 }
 
 /// The single-instance lock (§7): exclusive-create with the owner pid.

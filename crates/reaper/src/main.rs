@@ -528,8 +528,9 @@ fn run_reap(digest_arg: &str, execute: bool, format: Format) {
             std::process::exit(2);
         }
     };
-    // Finish any tomb a crashed run left behind (§7 crash-resumable).
-    for t in Deleter::drain_pending(&manifest) {
+    // Finish any tomb a crashed/interrupted run left behind — across ALL
+    // prior plans, not just this digest (§7 crash-resumable).
+    for t in Deleter::drain_pending_all(&state_dir().join("log")) {
         eprintln!("resumed and drained leftover tomb {t}");
     }
 

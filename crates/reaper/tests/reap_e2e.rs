@@ -209,3 +209,51 @@ fn a_refused_execute_releases_the_instance_lock() {
         "refused execute stranded the instance lock"
     );
 }
+
+/// A tomb from plan A must drain on ANY later execute (plan B) — resume is
+/// cross-digest (dogfood catch: interrupted drains lingered forever).
+#[test]
+fn interrupted_tombs_resume_across_digests() {
+    let td = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    aged_fixture(td.path());
+
+    // Forge an interrupted run: a manifest with Tombed and no Drained, plus
+    // the tomb itself on disk.
+    let tomb = td.path().join("proj/.reaper-tomb-legacy");
+    std::fs::create_dir_all(tomb.join("deep")).unwrap();
+    std::fs::write(tomb.join("deep/left.o"), vec![0u8; 128]).unwrap();
+    let log = state.path().join("reaper/log");
+    std::fs::create_dir_all(&log).unwrap();
+    std::fs::write(
+        log.join("sha256-legacy.jsonl"),
+        format!(
+            "{}\n",
+            serde_json::json!({"event":"tombed","path": td.path().join("proj/old").to_str().unwrap(),
+                "tomb": tomb.to_str().unwrap(), "recover": null, "size_bytes": 128})
+        ),
+    )
+    .unwrap();
+
+    // Execute a DIFFERENT plan; the legacy tomb must be drained first.
+    let (ok, out) = reaper(
+        state.path(),
+        &["scan", td.path().to_str().unwrap(), "--format", "json"],
+    );
+    assert!(ok);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let digest = v["plan_digest"].as_str().unwrap().to_string();
+    let (ok, _) = reaper(state.path(), &["reap", "--plan", &digest, "--execute"]);
+    assert!(ok);
+    assert!(
+        !tomb.exists(),
+        "cross-digest resume must drain the legacy tomb"
+    );
+
+    // And it is idempotent: the manifest now carries the Drained record.
+    let closed = std::fs::read_to_string(log.join("sha256-legacy.jsonl")).unwrap();
+    assert!(
+        closed.contains("drained"),
+        "recovery must close the ledger: {closed}"
+    );
+}
