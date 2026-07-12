@@ -180,3 +180,32 @@ fn exit_codes_are_honest_and_write_ahead_is_load_bearing() {
         std::fs::set_permissions(&log_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 }
+
+#[test]
+fn a_refused_execute_releases_the_instance_lock() {
+    let td = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    aged_fixture(td.path());
+    let (ok, out) = reaper(
+        state.path(),
+        &["scan", td.path().to_str().unwrap(), "--format", "json"],
+    );
+    assert!(ok);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let digest = v["plan_digest"].as_str().unwrap().to_string();
+
+    // Make the plan unexecutable: remove the target so the step refuses.
+    std::fs::remove_dir_all(td.path().join("proj/target")).unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_reaper"))
+        .env("REAPER_STATE_DIR", state.path())
+        .args(["reap", "--plan", &digest, "--execute"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "refused execute is non-zero");
+
+    // The lock must NOT be stranded (exit-without-drop regression).
+    assert!(
+        !state.path().join("reaper/execute.lock").exists(),
+        "refused execute stranded the instance lock"
+    );
+}

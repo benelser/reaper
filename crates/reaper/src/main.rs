@@ -237,6 +237,19 @@ struct Totals {
 }
 
 fn run_scan(root: &Utf8PathBuf, format: Format, policy: Policy, ecosystems: &[String]) {
+    // A missing or non-directory root is a loud error, never a serene
+    // 0-candidate success (dogfood catch).
+    match root.symlink_metadata() {
+        Ok(m) if m.is_dir() => {}
+        Ok(_) => {
+            eprintln!("{root} is not a directory");
+            std::process::exit(2);
+        }
+        Err(e) => {
+            eprintln!("cannot scan {root}: {e}");
+            std::process::exit(2);
+        }
+    }
     let registry = match Registry::embedded() {
         Ok(r) => r,
         Err(e) => {
@@ -508,7 +521,7 @@ fn run_reap(digest_arg: &str, execute: bool, format: Format) {
         return; // exit 0: a dry-run is always clean (§9)
     }
 
-    let _lock = match InstanceLock::acquire(&state_dir().join("execute.lock")) {
+    let lock = match InstanceLock::acquire(&state_dir().join("execute.lock")) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("{e}");
@@ -574,6 +587,9 @@ fn run_reap(digest_arg: &str, execute: bool, format: Format) {
             );
         }
     }
+    // std::process::exit skips destructors — release the lock EXPLICITLY
+    // before exiting, or a refused step strands it (dogfood catch).
+    drop(lock);
     // Exit codes (§9): non-zero ONLY when an --execute step failed.
     if any_failed {
         std::process::exit(1);

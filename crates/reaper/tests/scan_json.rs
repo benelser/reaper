@@ -54,3 +54,14 @@ fn scan_json_reports_candidate_fail_closed_and_pruned_totals() {
     assert_eq!(v["totals"]["files"], 2);
     assert_eq!(v["totals"]["candidates"], 1);
 }
+
+#[test]
+fn scanning_a_missing_path_or_file_is_a_loud_error() {
+    for bad in ["/definitely/not/a/path", file!()] {
+        let out = Command::new(env!("CARGO_BIN_EXE_reaper"))
+            .args(["scan", bad])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "scan {bad} must fail loudly");
+    }
+}
