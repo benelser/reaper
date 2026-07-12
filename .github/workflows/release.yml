@@ -1,0 +1,80 @@
+# Tag v* → build per-platform release binaries → publish to GitHub Releases
+# with PREDICTABLE asset names (install.sh/install.ps1 depend on them):
+#   reaper-<target>.tar.gz   (unix)     reaper-<target>.zip (windows)
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl } # static: any distro
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target }}" }
+      - uses: Swatinem/rust-cache@v2
+      - name: musl linker
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get install -y -q musl-tools
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p reaper
+      - name: package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf reaper-${{ matrix.target }}.tar.gz reaper
+          # raw binary + sha256 sidecar: what `reaper update` downloads/verifies
+          cp reaper reaper-${{ matrix.target }}
+          shasum -a 256 reaper-${{ matrix.target }} | awk '{print $1}' > reaper-${{ matrix.target }}.sha256
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path reaper.exe -DestinationPath reaper-${{ matrix.target }}.zip
+          # raw binary + sha256 sidecar: what `reaper update` downloads/verifies
+          Copy-Item reaper.exe "reaper-${{ matrix.target }}.exe"
+          (Get-FileHash "reaper-${{ matrix.target }}.exe" -Algorithm SHA256).Hash.ToLower() | Out-File -NoNewline "reaper-${{ matrix.target }}.exe.sha256"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/${{ matrix.target }}/release/reaper-${{ matrix.target }}.tar.gz
+            target/${{ matrix.target }}/release/reaper-${{ matrix.target }}.zip
+            target/${{ matrix.target }}/release/reaper-${{ matrix.target }}
+            target/${{ matrix.target }}/release/reaper-${{ matrix.target }}.exe
+            target/${{ matrix.target }}/release/reaper-${{ matrix.target }}.exe.sha256
+            target/${{ matrix.target }}/release/reaper-${{ matrix.target }}.sha256
+          generate_release_notes: true
+
+  verify-install: # the README one-liners, verbatim, against the REAL release
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: one-liner (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/benelser/reaper/main/install.sh | sh
+          "$HOME/.local/bin/reaper" --version
+          "$HOME/.local/bin/reaper" update --check
+      - name: one-liner (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://raw.githubusercontent.com/benelser/reaper/main/install.ps1 | iex
+          & (Join-Path $env:LOCALAPPDATA "reaper\bin\reaper.exe") --version
+          & (Join-Path $env:LOCALAPPDATA "reaper\bin\reaper.exe") update --check

@@ -1,0 +1,13 @@
+# The human surface (§8) — thin: same classify(), same plan(), same deleter.
+[package]
+name = "reaper-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reaper-core.workspace = true
+reaper-scan = { path = "../reaper-scan" }
+camino.workspace = true
+crossterm = "0.28"
+ratatui = "0.29"

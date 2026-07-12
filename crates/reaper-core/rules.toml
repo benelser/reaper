@@ -1,0 +1,225 @@
+# The embedded ruleset (§5) — every ecosystem is a ROW, never branch logic.
+# Order matters: first match per path wins. Overridable at
+# ~/.config/reaper/rules.toml and repo-local .reaper.toml (slice 6+).
+
+[[detector]]
+id = "rust-target"
+ecosystem = "rust"
+reclaim_dir = "target"
+marker = "Cargo.toml"
+safety = "regenerable"
+regenerate = "cargo build"
+
+[[detector]]
+id = "maven-target"
+ecosystem = "jvm"
+reclaim_dir = "target"
+marker = "pom.xml"
+safety = "regenerable"
+regenerate = "mvn package"
+
+[[detector]]
+id = "node-modules"
+ecosystem = "node"
+reclaim_dir = "node_modules"
+marker = "package.json"
+safety = "regenerable"
+regenerate = "npm install"
+
+[[detector]]
+id = "python-venv"
+ecosystem = "python"
+reclaim_dir = ".venv"
+marker = "pyproject.toml"
+safety = "regenerable"
+regenerate = "uv sync"
+
+[[detector]]
+id = "python-venv-req"
+ecosystem = "python"
+reclaim_dir = ".venv"
+marker = "requirements.txt"
+safety = "regenerable"
+regenerate = "python -m venv .venv && .venv/bin/pip install -r requirements.txt"
+
+[[detector]]
+id = "python-venv-plain"
+ecosystem = "python"
+reclaim_dir = "venv"
+marker = "requirements.txt"
+safety = "regenerable"
+regenerate = "python -m venv venv && venv/bin/pip install -r requirements.txt"
+
+[[detector]]
+id = "python-pycache"
+ecosystem = "python"
+reclaim_dir = "__pycache__"
+safety = "regenerable"
+regenerate = "python (regenerates on import)"
+
+[[detector]]
+id = "python-mypy-cache"
+ecosystem = "python"
+reclaim_dir = ".mypy_cache"
+safety = "regenerable"
+regenerate = "mypy (regenerates on next run)"
+
+[[detector]]
+id = "python-pytest-cache"
+ecosystem = "python"
+reclaim_dir = ".pytest_cache"
+safety = "regenerable"
+regenerate = "pytest (regenerates on next run)"
+
+[[detector]]
+id = "python-tox"
+ecosystem = "python"
+reclaim_dir = ".tox"
+marker = "tox.ini"
+safety = "regenerable"
+regenerate = "tox"
+
+[[detector]]
+id = "gradle-build"
+ecosystem = "jvm"
+reclaim_dir = "build"
+marker = "build.gradle"
+safety = "regenerable"
+regenerate = "gradle build"
+
+[[detector]]
+id = "gradle-kts-build"
+ecosystem = "jvm"
+reclaim_dir = "build"
+marker = "build.gradle.kts"
+safety = "regenerable"
+regenerate = "gradle build"
+
+[[detector]]
+id = "gradle-dot"
+ecosystem = "jvm"
+reclaim_dir = ".gradle"
+marker = "build.gradle"
+safety = "regenerable"
+regenerate = "gradle build"
+
+[[detector]]
+id = "dotnet-bin"
+ecosystem = "dotnet"
+reclaim_dir = "bin"
+marker = "*.csproj"
+safety = "regenerable"
+regenerate = "dotnet build"
+
+[[detector]]
+id = "dotnet-obj"
+ecosystem = "dotnet"
+reclaim_dir = "obj"
+marker = "*.csproj"
+safety = "regenerable"
+regenerate = "dotnet build"
+
+[[detector]]
+id = "go-bin"
+ecosystem = "go"
+reclaim_dir = "bin"
+marker = "go.mod"
+safety = "regenerable"
+regenerate = "go build ./..."
+
+[[detector]]
+id = "xcode-deriveddata"
+ecosystem = "apple"
+reclaim_dir = "DerivedData"
+marker = "*.xcodeproj"
+safety = "regenerable"
+regenerate = "xcodebuild"
+
+[[detector]]
+id = "cocoapods"
+ecosystem = "apple"
+reclaim_dir = "Pods"
+marker = "Podfile"
+safety = "regenerable"
+regenerate = "pod install"
+
+[[detector]]
+id = "nextjs"
+ecosystem = "node"
+reclaim_dir = ".next"
+marker = "package.json"
+safety = "regenerable"
+regenerate = "next build"
+
+[[detector]]
+id = "turbo"
+ecosystem = "node"
+reclaim_dir = ".turbo"
+marker = "package.json"
+safety = "regenerable"
+regenerate = "turbo build"
+
+[[detector]]
+id = "nuxt"
+ecosystem = "node"
+reclaim_dir = ".nuxt"
+marker = "package.json"
+safety = "regenerable"
+regenerate = "nuxt build"
+
+[[detector]]
+id = "zig-cache"
+ecosystem = "zig"
+reclaim_dir = ".zig-cache"
+marker = "build.zig"
+safety = "regenerable"
+regenerate = "zig build"
+
+[[detector]]
+id = "zig-out"
+ecosystem = "zig"
+reclaim_dir = "zig-out"
+marker = "build.zig"
+safety = "regenerable"
+regenerate = "zig build"
+
+[[detector]]
+id = "dart-tool"
+ecosystem = "dart"
+reclaim_dir = ".dart_tool"
+marker = "pubspec.yaml"
+safety = "regenerable"
+regenerate = "dart pub get"
+
+[[detector]]
+id = "elixir-build"
+ecosystem = "elixir"
+reclaim_dir = "_build"
+marker = "mix.exs"
+safety = "regenerable"
+regenerate = "mix compile"
+
+[[detector]]
+id = "php-vendor"
+ecosystem = "php"
+reclaim_dir = "vendor"
+marker = "composer.json"
+safety = "regenerable"
+regenerate = "composer install"
+
+# The special case: needs COMPUTED git facts (read natively — never a subprocess, G7).
+[[detector]]
+id = "git-worktree"
+ecosystem = "git"
+kind = "git_worktree"
+safety = "git_worktree"
+
+# The catch-all: the Cache Directory Tagging Standard. Zero extra syscalls —
+# the tag file is already in the listing. Catches self-declared caches that
+# no ecosystem row claims. Coverage for free.
+[[detector]]
+id = "cachedir-tag"
+ecosystem = "generic"
+kind = "cachedir_tag"
+safety = "regenerable"
+regenerate = "regenerates on next build/use"

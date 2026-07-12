@@ -1,0 +1,119 @@
+# The outer feedback loop (SPEC §11): same commands a developer runs locally,
+# full suite on all three OSes, no CI-only magic. The bench gate is a SAME-RUN
+# MEDIAN RATIO — measured: absolute times on hosted runners
+# spread 2.2× across machines — an absolute gate would train red-blindness).
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  lint: # Linux only — fmt/clippy results are platform-independent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: rustfmt, clippy }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features
+      - name: core has zero platform cfg # the anti-leak fitness gate (§6.5)
+        run: "! grep -rn 'cfg(target_os' crates/reaper-core/src"
+      - name: no subprocess in shipped code # the G7 fitness gate
+        run: "! grep -rn 'process::Command' crates/*/src"
+      - name: core purity # dep allowlist (§10)
+        run: cargo test -p reaper-core --test dep_allowlist
+
+  test: # THE tri-platform matrix — the point
+    needs: lint
+    strategy:
+      fail-fast: false # see all three, always
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-features
+
+  bench-gate: # Linux only — and a ratio, never an absolute time (R10)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p reaper-scan --release -- --ignored --nocapture
+
+  installers: # the one-line installers, end-to-end, INCLUDING PATH placement
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p reaper
+      - name: self-update swap machinery (artifact mode, unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cp target/release/reaper "$RUNNER_TEMP/reaper"
+          REAPER_UPDATE_ARTIFACT="$RUNNER_TEMP/reaper" "$RUNNER_TEMP/reaper" update
+          "$RUNNER_TEMP/reaper" --version
+      - name: self-update swap machinery (artifact mode, windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:RUNNER_TEMP "reaper.exe"
+          Copy-Item target/release/reaper.exe $bin
+          $env:REAPER_UPDATE_ARTIFACT = $bin
+          & $bin update
+          if ($LASTEXITCODE -ne 0) { throw "update failed" }
+          & $bin --version
+      - name: package + run install.sh (artifact mode) + verify PATH persistence
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cd target/release && tar czf /tmp/reaper-local.tar.gz reaper && cd -
+          export SHELL=/bin/bash HOME="$RUNNER_TEMP/fakehome"
+          mkdir -p "$HOME"
+          REAPER_ARTIFACT=/tmp/reaper-local.tar.gz sh install.sh
+          grep -q "added by reaper installer" "$HOME/.bashrc"
+          # a FRESH shell that sources the rc must find reaper on PATH
+          env -i HOME="$HOME" bash -c 'source ~/.bashrc && reaper --version'
+      - name: package + run install.ps1 (artifact mode) + verify PATH persistence
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/release/reaper.exe -DestinationPath $env:TEMP\reaper-local.zip
+          $env:REAPER_ARTIFACT = "$env:TEMP\reaper-local.zip"
+          ./install.ps1
+          $dir = Join-Path $env:LOCALAPPDATA "reaper\bin"
+          $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if (-not ($userPath -split ";" | Where-Object { $_ -eq $dir })) { throw "not on user PATH" }
+          & (Join-Path $dir "reaper.exe") --version
+
+  miri: # the unsafe buffer parsing (dirread::parse) under the interpreter.
+    # Miri validates the pointer/layout logic that parses getdents/attrlist/
+    # NtQuery records over SYNTHETIC buffers — the parsers are pure and
+    # compiled on every OS, so one Linux run covers all three (§11).
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with: { components: miri }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo miri test -p reaper-scan --lib dirread::parse

@@ -1,0 +1,20 @@
+# PURE. The entire safety argument is a total function in this crate.
+# Dependency growth is gated by tests/dep_allowlist.rs — see SPEC §10.
+[package]
+name = "reaper-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+camino.workspace = true
+globset = "0.4"
+serde.workspace = true
+# The plan digest is part of the CONTRACT (§9) — pure hashing + canonical
+# bytes, no IO. Priced against the ~zero-deps rule and accepted.
+serde_json.workspace = true
+sha2 = "0.10"
+toml = "0.8"
+
+[dev-dependencies]
+proptest = "1"

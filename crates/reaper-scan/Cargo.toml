@@ -1,0 +1,25 @@
+# IO SHELL + the traversal engine. Implements the ports reaper-core defines.
+[package]
+name = "reaper-scan"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reaper-core.workspace = true
+camino.workspace = true
+rayon.workspace = true
+# The native git-state reader (G7: the shipped binary NEVER execs git; real
+# git appears test-side only, as the differential oracle).
+gix = { version = "0", features = ["status"] }
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+# jwalk is the BENCH BASELINE the orchestrator must beat (SPEC §6.2) — a
+# dev-dependency only; the shipped engine is ours.
+jwalk = "0.8"
+tempfile = "3"

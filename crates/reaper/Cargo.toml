@@ -1,0 +1,32 @@
+# The binary: dispatch to the agent CLI (and, at slice 7, the TUI).
+[package]
+name = "reaper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "reaper"
+path = "src/main.rs"
+
+[features]
+# --no-default-features = the lean headless/agent build (§3): no ratatui.
+default = ["tui"]
+tui = ["dep:reaper-tui"]
+
+[dependencies]
+reaper-core.workspace = true
+reaper-scan.workspace = true
+reaper-tui = { path = "../reaper-tui", optional = true }
+camino.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# self-update: in-process HTTP (no subprocess), checksum-verified, atomic swap
+self-replace = "1"
+sha2 = "0.10"
+ureq = "2"
+
+[dev-dependencies]
+filetime = "0.2" # ages fixtures — no wall-clock games in tests (§11.2)
+tempfile = "3"
