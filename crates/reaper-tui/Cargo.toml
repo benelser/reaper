@@ -11,3 +11,4 @@ reaper-scan = { path = "../reaper-scan" }
 camino.workspace = true
 crossterm = "0.28"
 ratatui = "0.29"
+rayon.workspace = true

@@ -474,19 +474,39 @@ fn spawn_scan(root: Utf8PathBuf) -> mpsc::Receiver<Msg> {
         });
 
         let candidates = discovered.into_inner().unwrap();
-        for f in reaper_scan::gather_facts(
-            &candidates,
-            &prober,
-            reaper_scan::select_probe().as_deref(),
-            Some(&git),
-        ) {
-            let disposition = classify(&f, &policy);
-            let _ = tx.send(Msg::Probed {
-                path: f.candidate.path.clone(),
-                facts: Box::new(f),
-                disposition,
-            });
-        }
+        // Sweep FIRST (one fast pass over the process table), then probe each
+        // candidate in parallel and STREAM its verdict the moment it lands —
+        // sizes trickle in instead of arriving all at once at the end.
+        let live = reaper_scan::select_probe();
+        let pids: Vec<Option<Vec<u32>>> = match &live {
+            Some(probe) => {
+                let dirs: Vec<Utf8PathBuf> =
+                    candidates.iter().map(|c| c.path.clone()).collect();
+                probe.live_pids(&dirs)
+            }
+            None => vec![None; candidates.len()],
+        };
+        rayon::scope(|sc| {
+            for (c, live_pids) in candidates.iter().zip(pids) {
+                let tx = tx.clone();
+                let prober = &prober;
+                let git = &git;
+                let policy = &policy;
+                sc.spawn(move |_| {
+                    let mut f = prober.probe(c);
+                    if matches!(c.safety_class, SafetyClass::GitWorktree) {
+                        f.git = reaper_core::GitProbe::facts(git, &c.path);
+                    }
+                    f.live_pids = live_pids;
+                    let disposition = classify(&f, policy);
+                    let _ = tx.send(Msg::Probed {
+                        path: f.candidate.path.clone(),
+                        facts: Box::new(f),
+                        disposition,
+                    });
+                });
+            }
+        });
     });
     rx
 }

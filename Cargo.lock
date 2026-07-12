@@ -2180,7 +2180,7 @@ dependencies = [
 
 [[package]]
 name = "reaper"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "camino",
  "clap",
@@ -2198,7 +2198,7 @@ dependencies = [
 
 [[package]]
 name = "reaper-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "camino",
  "globset",
@@ -2211,7 +2211,7 @@ dependencies = [
 
 [[package]]
 name = "reaper-scan"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "camino",
  "gix",
@@ -2226,11 +2226,12 @@ dependencies = [
 
 [[package]]
 name = "reaper-tui"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "camino",
  "crossterm",
  "ratatui",
+ "rayon",
  "reaper-core",
  "reaper-scan",
 ]
