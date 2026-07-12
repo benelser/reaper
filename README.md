@@ -9,6 +9,13 @@ machine plus a small gamble that nothing precious is inside.
 classifies every directory as *reclaimable* or *refused-with-a-reason*, and
 reclaims only what it can prove is safe — from a keyboard TUI or a JSON CLI.
 
+**reaper is for agents, by agents.** Coding agents fill your disk faster
+than you ever did — and reaper is the tool they call to clean up after
+themselves, safely ([the contract](AGENTS.md)). Works just as well for
+humans with a keyboard.
+
+**Let your agents cook. Let reaper reap.**
+
 [![ci](https://github.com/benelser/reaper/actions/workflows/ci.yml/badge.svg)](https://github.com/benelser/reaper/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/benelser/reaper?include_prereleases)](https://github.com/benelser/reaper/releases)
 ![platforms](https://img.shields.io/badge/platforms-macOS%20·%20Linux%20·%20Windows-blue)
